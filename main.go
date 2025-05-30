@@ -1,51 +1,115 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"runtime"
-	"runtime/debug"
 
+	"VoxelRPG/client"
+	Client "VoxelRPG/client"
+	Log "VoxelRPG/logging"
 	Types "VoxelRPG/types"
 
+	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/go-gl/glfw/v3.3/glfw"
 )
-
-func CheckError(err error) {
-
-	if err != nil {
-		fmt.Println(string(debug.Stack()))
-		log.Fatalln("Error has occured:", err.Error())
-	}
-
-}
 
 func main() {
 
 	runtime.LockOSThread()
 
 	WindowBuilder := &Types.WindowBuilder{
-		Width:  1920,
-		Height: 1080,
-		Title:  "Test Window",
+		Width:  800,
+		Height: 600,
+		Title:  "Voxel RPG",
 	}
 
-	defer glfw.Terminate()
-
 	window, err := Types.CreateWindow(WindowBuilder)
-	CheckError(err)
+	Types.CheckError(err)
 
-	err = Types.NewGLContext()
-	CheckError(err)
-
-	Types.NewLog("Initializing OpenGL Settings")
-
-	Types.NewLog("Program startup:")
+	go renderLoop(window)
 
 	for !window.ShouldClose() {
+		// WaitEventsTimeout waits max 100ms or until an event happens,
+		// so the UI remains responsive during resize.
+		glfw.WaitEventsTimeout(0.1)
+	}
+
+	glfw.Terminate()
+
+}
+
+func renderLoop(window *glfw.Window) {
+
+	runtime.LockOSThread()
+	window.MakeContextCurrent()
+
+	W, H := window.GetSize()
+
+	WindowBuilder := &Types.WindowBuilder{
+		Width:  W,
+		Height: H,
+		Title:  "",
+	}
+
+	err := Types.NewGLContext()
+	Types.CheckError(err)
+
+	Client, err := Client.NewClient()
+	Types.CheckError(err)
+
+	Types.OpenGLSetup(WindowBuilder, Client)
+
+	version := gl.GoStr(gl.GetString(gl.VERSION))
+	Log.NewLog("Loaded OpenGL - Version:", version, "\n")
+
+	Log.NewLog("Events - Initializing..")
+
+	Client.SetupKeybinds()
+
+	window.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
+		Types.WindowInputCB(Client, w, key, scancode, action, mods)
+	})
+
+	window.SetCursorPosCallback(func(w *glfw.Window, xpos float64, ypos float64) {
+		Types.WindowMouseCB(Client, w, xpos, ypos)
+	})
+
+	Log.NewLog("Events - Initialized\n")
+
+	if glfw.RawMouseMotionSupported() {
+		window.SetInputMode(glfw.RawMouseMotion, glfw.True)
+	}
+
+	window.SetFocusCallback(func(w *glfw.Window, focused bool) {
+
+		if !focused {
+			w.SetInputMode(glfw.CursorMode, glfw.CursorNormal)
+		}
+
+	})
+
+	Log.NewLog("Program startup:")
+
+	ResizeCheckDelta := float32(1) / float32(60)
+	LastResizeCheck := float64(0.0)
+
+	for !window.ShouldClose() {
+
+		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+
+		if glfw.GetTime() > LastResizeCheck {
+
+			LastResizeCheck = glfw.GetTime() + float64(ResizeCheckDelta)
+
+			Types.OpenGLFixedUpdate(window, WindowBuilder)
+			client.ClientCheckMovement(Client, ResizeCheckDelta)
+
+		}
+
+		Types.OpenGLUpdate(Client.Camera)
 
 		glfw.PollEvents()
 		window.SwapBuffers()
 
 	}
+
 }

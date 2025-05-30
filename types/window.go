@@ -1,6 +1,8 @@
 package types
 
 import (
+	Log "VoxelRPG/logging"
+
 	"github.com/go-gl/glfw/v3.3/glfw"
 )
 
@@ -12,7 +14,7 @@ type WindowBuilder struct {
 
 func CreateWindow(builder *WindowBuilder) (*glfw.Window, error) {
 
-	NewLog("Window Creating..")
+	Log.NewLog("Window - Creating..")
 
 	profiler := ProfilerStart("glfw_window")
 
@@ -21,7 +23,7 @@ func CreateWindow(builder *WindowBuilder) (*glfw.Window, error) {
 	err := glfw.Init()
 
 	if err != nil {
-		NewLog("Could not initialize GLFW")
+		Log.NewLog("Could not initialize GLFW")
 		return nil, err
 	}
 
@@ -32,21 +34,20 @@ func CreateWindow(builder *WindowBuilder) (*glfw.Window, error) {
 	glfw.WindowHint(glfw.ContextVersionMinor, 1)
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
 	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
+	glfw.WindowHint(glfw.ScaleToMonitor, glfw.True)
 
 	window, err := glfw.CreateWindow(builder.Width, builder.Height, builder.Title, nil, nil)
 
 	if err != nil {
-		NewLog("Could not create window")
+		Log.NewLog("Could not create window")
 		glfw.Terminate()
 		return nil, err
 
 	}
 
-	window.MakeContextCurrent()
-
 	TimeTook := profiler.EndProfiler(profiler)
 
-	NewLog("Window Created - Time:", TimeTook, "\n")
+	Log.NewLog("Window - Created ( Time:", TimeTook, ")\n")
 
 	return window, nil
 
