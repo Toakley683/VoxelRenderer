@@ -7,6 +7,7 @@ import (
 
 	Client "VoxelRPG/client"
 	Log "VoxelRPG/logging"
+	World "VoxelRPG/world"
 )
 
 var (
@@ -79,7 +80,7 @@ func setupBuffers() {
 
 	// Create Fragment Shader
 
-	fragment_shader, err := NewShader("fragment_shader.glsl", gl.FRAGMENT_SHADER)
+	fragment_shader, err := NewShader("ray_march_frag.glsl", gl.FRAGMENT_SHADER)
 	CheckError(err)
 
 	shaders := []uint32{
@@ -108,22 +109,28 @@ func setupBuffers() {
 
 	// Make static buffer object with cube verticies
 
-	NewBufferObject(1, gl.ARRAY_BUFFER, func() {
-		gl.BufferData(gl.ARRAY_BUFFER, len(cubeVertices)*4, gl.Ptr(cubeVertices), gl.STATIC_DRAW)
+	NewBufferObject(1, gl.ARRAY_BUFFER, func(_ uint32) {
+		gl.BufferData(gl.ARRAY_BUFFER, len(fullscreenQuadVertices)*4, gl.Ptr(fullscreenQuadVertices), gl.STATIC_DRAW)
 	})
 
 	// Set offset from our vertex buffer object to allow it to read verticies correctly
 
 	vertAttrib := uint32(gl.GetAttribLocation(shaderProgram, gl.Str("vert\x00")))
-	gl.VertexAttribPointerWithOffset(vertAttrib, 3, gl.FLOAT, false, 5*4, 0)
+	gl.VertexAttribPointerWithOffset(vertAttrib, 2, gl.FLOAT, false, 4*4, 0)
 	gl.EnableVertexAttribArray(vertAttrib)
 
 	texCoordAttrib := uint32(gl.GetAttribLocation(shaderProgram, gl.Str("vertTexCoord\x00")))
 	gl.EnableVertexAttribArray(texCoordAttrib)
-	gl.VertexAttribPointerWithOffset(texCoordAttrib, 2, gl.FLOAT, false, 5*4, 3*4)
+	gl.VertexAttribPointerWithOffset(texCoordAttrib, 2, gl.FLOAT, false, 4*4, uintptr(2*4))
 
 	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 	gl.BindVertexArray(0)
+
+	/* --[[ Setup Octtree ]] */
+
+	World.MainWorld.Populate(shaderProgram)
+
+	//Log.NewLog(chunk)
 
 }
 
@@ -141,8 +148,7 @@ func OpenGLSetup(window *WindowBuilder, client *Client.ClientContext) {
 	/* --[[ Setup Perspective ]] */
 
 	setupPerspectives(window, client)
-
-	gl.Viewport(0, 0, int32(window.Width), int32(window.Height))
+	OnWindowResize(glfw.GetCurrentContext(), window.Width, window.Height, window)
 
 	Log.NewLog("OpenGL Setup - Complete\n")
 
@@ -159,15 +165,14 @@ func OnWindowResize(w *glfw.Window, width int, height int, wBuild *WindowBuilder
 	wBuild.Width = width
 	wBuild.Height = height
 
-	projection := mgl32.Perspective(mgl32.DegToRad(FOV), float32(width)/float32(height), ZNear, ZFar)
-	projectionUniform := gl.GetUniformLocation(shaderProgram, gl.Str("projection\x00"))
-	gl.UniformMatrix4fv(projectionUniform, 1, false, &projection[0])
+	resUniform := gl.GetUniformLocation(shaderProgram, gl.Str("iResolution\x00"))
+	gl.Uniform2f(resUniform, float32(wBuild.Width), float32(wBuild.Height))
 
 }
 
 func OpenGLFixedUpdate(window *glfw.Window, windowBuilder *WindowBuilder) {
 
-	// Always runs every 1/60 of a second
+	// Always runs every 1/165 of a second
 
 	W, H := window.GetSize()
 
@@ -176,6 +181,10 @@ func OpenGLFixedUpdate(window *glfw.Window, windowBuilder *WindowBuilder) {
 		OnWindowResize(window, W, H, windowBuilder)
 
 	}
+
+	projection := mgl32.Perspective(mgl32.DegToRad(FOV), float32(windowBuilder.Width)/float32(windowBuilder.Height), ZNear, ZFar)
+	projectionUniform := gl.GetUniformLocation(shaderProgram, gl.Str("projection\x00"))
+	gl.UniformMatrix4fv(projectionUniform, 1, false, &projection[0])
 
 }
 
@@ -189,7 +198,7 @@ func OpenGLUpdate(cam *Client.Camera) {
 	// Update Camera Matrix
 
 	view := mgl32.LookAtV(
-		mgl32.Vec3{cam.Pos[0], cam.Pos[1], cam.Pos[2]},
+		cam.Pos,
 		mgl32.Vec3{cam.Pos[0] + cam.Front[0], cam.Pos[1] + cam.Front[1], cam.Pos[2] + cam.Front[2]},
 		mgl32.Vec3{0, 1, 0},
 	)
@@ -197,9 +206,15 @@ func OpenGLUpdate(cam *Client.Camera) {
 	cameraUniform := gl.GetUniformLocation(shaderProgram, gl.Str("camera\x00"))
 	gl.UniformMatrix4fv(cameraUniform, 1, false, &view[0])
 
+	camPosUniform := gl.GetUniformLocation(shaderProgram, gl.Str("camPos\x00"))
+	gl.Uniform3f(camPosUniform, cam.Pos[0], cam.Pos[1], cam.Pos[2])
+
+	timeUniform := gl.GetUniformLocation(shaderProgram, gl.Str("iTime\x00"))
+	gl.Uniform1f(timeUniform, float32(glfw.GetTime()))
+
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 
-	gl.DrawArrays(gl.TRIANGLES, 0, 6*2*3)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 
 }

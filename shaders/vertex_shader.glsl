@@ -1,15 +1,12 @@
-#version 330
+#version 460 core
 
-uniform mat4 projection;
-uniform mat4 camera;
-uniform mat4 model;
+layout(location = 0) in vec2 vert; // vec2 for fullscreen quad
 
-in vec3 vert;
 in vec2 vertTexCoord;
 
 out vec2 fragTexCoord;
 
 void main() {
     fragTexCoord = vertTexCoord;
-    gl_Position = projection * camera * model * vec4(vert, 1);
+    gl_Position = vec4(vert, 0.0, 1.0);
 }

@@ -38,15 +38,15 @@ func NewClient() (*ClientContext, error) {
 
 	Camera := Camera{}
 
-	Camera.Speed = 15
+	Camera.Speed = 2
 
 	Camera.Pos = mgl32.Vec3{}
 
-	Camera.Pos[0] = 3
-	Camera.Pos[1] = 3
-	Camera.Pos[2] = 3
+	Camera.Pos[0] = 0
+	Camera.Pos[1] = 0
+	Camera.Pos[2] = -3
 
-	Camera.Yaw = -90
+	Camera.Yaw = 90
 
 	radYaw := Camera.Yaw * math.Pi / 180
 	radPitch := Camera.Pitch * math.Pi / 180
@@ -129,6 +129,18 @@ func ClientCheckMovement(context *ClientContext, deltaTime float32) {
 		Dir := mgl32.Vec3{0, -1, 0}.Mul(context.Camera.Speed).Mul(deltaTime)
 
 		context.Camera.Pos = context.Camera.Pos.Add(Dir)
+
+	}
+
+	if context.InputMap[glfw.KeyLeftShift] != glfw.Release {
+
+		context.Camera.Speed = 10
+
+	}
+
+	if context.InputMap[glfw.KeyLeftShift] == glfw.Release {
+
+		context.Camera.Speed = 3
 
 	}
 

@@ -3,8 +3,7 @@ package main
 import (
 	"runtime"
 
-	"VoxelRPG/client"
-	Client "VoxelRPG/client"
+	ClientContext "VoxelRPG/client"
 	Log "VoxelRPG/logging"
 	Types "VoxelRPG/types"
 
@@ -41,6 +40,7 @@ func renderLoop(window *glfw.Window) {
 
 	runtime.LockOSThread()
 	window.MakeContextCurrent()
+	glfw.SwapInterval(1)
 
 	W, H := window.GetSize()
 
@@ -53,7 +53,7 @@ func renderLoop(window *glfw.Window) {
 	err := Types.NewGLContext()
 	Types.CheckError(err)
 
-	Client, err := Client.NewClient()
+	Client, err := ClientContext.NewClient()
 	Types.CheckError(err)
 
 	Types.OpenGLSetup(WindowBuilder, Client)
@@ -89,19 +89,28 @@ func renderLoop(window *glfw.Window) {
 
 	Log.NewLog("Program startup:")
 
-	ResizeCheckDelta := float32(1) / float32(60)
-	LastResizeCheck := float64(0.0)
+	CheckDelta := float32(1) / float32(165)
+	UpdateCheck := float64(0.0)
+
+	//LastCh := glfw.GetTime()
 
 	for !window.ShouldClose() {
 
+		Now := glfw.GetTime()
+
+		//Delta := Now - LastCh
+		//LastCh = Now
+
 		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-		if glfw.GetTime() > LastResizeCheck {
+		if Now > UpdateCheck {
 
-			LastResizeCheck = glfw.GetTime() + float64(ResizeCheckDelta)
+			UpdateCheck = Now + float64(CheckDelta)
 
 			Types.OpenGLFixedUpdate(window, WindowBuilder)
-			client.ClientCheckMovement(Client, ResizeCheckDelta)
+			ClientContext.ClientCheckMovement(Client, CheckDelta)
+
+			//Log.NewLog("FPS:", 1/Delta)
 
 		}
 
