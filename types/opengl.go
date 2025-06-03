@@ -215,6 +215,13 @@ func OpenGLUpdate(cam *Client.Camera) {
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 
-	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	for _, chunk := range World.MainWorld.Chunks {
+
+		gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, chunk.SSBO)
+		chunk.SetChunkPositionUniform(shaderProgram)
+
+		gl.DrawArrays(gl.TRIANGLES, 0, 6)
+
+	}
 
 }

@@ -134,7 +134,7 @@ func ClientCheckMovement(context *ClientContext, deltaTime float32) {
 
 	if context.InputMap[glfw.KeyLeftShift] != glfw.Release {
 
-		context.Camera.Speed = 10
+		context.Camera.Speed = 25
 
 	}
 

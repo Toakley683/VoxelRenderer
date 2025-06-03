@@ -9,7 +9,7 @@ struct GridMetadata {
 
 struct GridNodeFlat {
     uint flags;
-    uint[8] children;
+    int childStart;
     int size;
     GridMetadata metadata;
 };
@@ -17,8 +17,6 @@ struct GridNodeFlat {
 layout(std430, binding = 0) buffer NodeBuffer {
     GridNodeFlat nodes[];
 };
-
-uint MaxUINT32 = 0xFFFFFFFFu;
 
 out vec4 FragColor;
 
@@ -45,17 +43,8 @@ bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tNear, out 
 }
 
 // Return true if a node is a leaf (no children)
-
-struct FlagBits {
-    bool occupied;
-    bool leaf;
-};
-
-FlagBits DecodeFlags(uint flags) {
-    FlagBits result;
-    result.occupied = (flags & 1u) != 0u;     // bit 0
-    result.leaf = (flags & 2u) != 0u;         // bit 1
-    return result;
+bool isLeaf(GridNodeFlat node) {
+    return node.childStart == -1;
 }
 
 // Compute world-space position of a node (based on flat index math)
@@ -74,7 +63,7 @@ vec3 getNodePosition(int nodeIndex, int size) {
 bool raymarchOctree(vec3 ro, vec3 rd, out vec4 hitColor ) {
     
     const int MAX_STACK = 64;
-    uint stack[MAX_STACK];
+    int stack[MAX_STACK];
     vec3 stackPos[MAX_STACK];
     int stackSize = 0;
 
@@ -86,7 +75,7 @@ bool raymarchOctree(vec3 ro, vec3 rd, out vec4 hitColor ) {
 
         stackSize--;
         
-        uint nodeIndex = stack[stackSize];
+        int nodeIndex = stack[stackSize];
         vec3 nodePos = stackPos[stackSize];
 
         if (nodeIndex < 0 || nodeIndex >= nodes.length()) continue;
@@ -98,33 +87,32 @@ bool raymarchOctree(vec3 ro, vec3 rd, out vec4 hitColor ) {
 
         float tNear, tFar;
         if (!intersectAABB(ro, rd, boxMin, boxMax, tNear, tFar)) {
-            return false;
+            hitColor = vec4(vec3(0.4),1.0);
+            return true;
         }
 
-        FlagBits flagInfo = DecodeFlags( node.flags);
-        
-        if (!flagInfo.occupied) { 
-            continue;
-        }
-
-        if (flagInfo.leaf) {
-            if (flagInfo.occupied) { 
+        if (isLeaf(node)) {
+        //if (node.size == 2) {
+            if ((node.flags & 1u) != 0u) { 
 
                 //float v = ( node.metadata.R + node.metadata.G + node.metadata.B ) / ( 3.0 * 256.0 )
 
                 hitColor = vec4(vec3(node.metadata.R, node.metadata.G, node.metadata.B) / 256.0, 1.0);
                 return true; // Hit found!
+            } else {
+                continue; // Leaf but empty voxel, ignore
             }
         }
 
         struct ChildEntry {
-            uint index;
+            int index;
             vec3 pos;
             float tNear;
         };
         
         ChildEntry children[8];
         int childCount = 0;
+        int childStart = node.childStart;
 
         float tClosest = 1e30;
         bool hit = false;
@@ -133,15 +121,12 @@ bool raymarchOctree(vec3 ro, vec3 rd, out vec4 hitColor ) {
         
         for ( int i = 0; i < 8; i++ ) {
 
-            uint cIndex = node.children[i];
-
-            if ( cIndex == MaxUINT32 ) continue;
+            int cIndex = childStart + i;
+            if (cIndex < 0 || cIndex >= nodes.length()) break;
 
             GridNodeFlat child = nodes[cIndex];
-            
-            FlagBits flagInfo = DecodeFlags( child.flags);
 
-            //if ( !flagInfo.occupied ) continue;
+            if ( (child.flags & 1u) == 0u ) continue;
 
             float size = child.size;
             vec3 childPos = nodePos + vec3(i & 1, (i >> 1) & 1, (i >> 2) & 1) * size; 
@@ -198,7 +183,7 @@ void main() {
     if ( hit ) {
         FragColor = hitColor;
     } else {
-        discard;
+        FragColor = vec4( 0.3, 0.3, 0.3, 1.0 );
     }
 
 }

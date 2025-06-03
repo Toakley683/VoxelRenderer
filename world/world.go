@@ -25,7 +25,9 @@ func (w *World) Update() {
 
 func (w *World) Populate(shaderProgram uint32) {
 
-	ChunksLength := (*w.RenderDistance * *w.RenderDistance)
+	rDistance := *w.RenderDistance
+
+	ChunksLength := (rDistance * rDistance * rDistance)
 
 	w.Chunks = make([]*Chunk, ChunksLength)
 
@@ -38,7 +40,7 @@ func (w *World) Populate(shaderProgram uint32) {
 		value *Chunk
 	}
 
-	var resultOutput = make(chan WorldOutput, FULL_CHUNK_SIZE)
+	var resultOutput = make(chan WorldOutput, ChunksLength)
 
 	batchSize := ChunksLength / WORLD_WORKERS
 
@@ -60,12 +62,13 @@ func (w *World) Populate(shaderProgram uint32) {
 
 			for chunkIndex := start; chunkIndex < end; chunkIndex++ {
 
-				x := chunkIndex % CHUNK_SIZE
-				y := (chunkIndex / CHUNK_SIZE) % CHUNK_SIZE
+				x := chunkIndex % rDistance
+				y := (chunkIndex / rDistance) % rDistance
+				z := chunkIndex / (rDistance * rDistance)
 
 				resultOutput <- WorldOutput{
 					index: chunkIndex,
-					value: NewChunk(Vec3{uint32(x), 0, uint32(y)}),
+					value: NewChunk(Vec3{uint32(x), uint32(y), uint32(z)}),
 				}
 
 			}

@@ -14,7 +14,7 @@ const (
 )
 
 var (
-	RENDER_DISTANCE         int  = 1
+	RENDER_DISTANCE         int  = 6
 	RENDER_DISTANCE_POINTER *int = &RENDER_DISTANCE
 )
 

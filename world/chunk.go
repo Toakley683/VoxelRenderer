@@ -1,26 +1,20 @@
 package world
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 
 	Log "VoxelRPG/logging"
+
+	"github.com/go-gl/gl/v4.6-core/gl"
 )
 
 //"github.com/go-gl/gl/v4.6-core/gl"
 
 func IsBlockFull(x, y, z int) bool {
 
-	if z == 0 {
-		if y == 0 {
-			if z == 0 {
-				Log.NewLog("New block at:", x, y, z)
-				return true
-			}
-		}
-	}
-
-	return false //rand.Float32() > 0.55
+	return rand.Float32() > 0.95
 
 }
 
@@ -104,4 +98,17 @@ func (chunk *Chunk) Upload(shaderProgram uint32) {
 	chunk.SetChunkPositionUniform(shaderProgram)
 
 	chunk.UploadOctreeSSBO(grid)
+}
+
+func (chunk *Chunk) SetChunkPositionUniform(program uint32) {
+
+	loc := gl.GetUniformLocation(program, gl.Str("chunkPos\x00"))
+	gl.Uniform3i(loc, int32(chunk.Position.X), int32(chunk.Position.Y), int32(chunk.Position.Z))
+
+	lsi := gl.GetUniformLocation(program, gl.Str("LevelStartIndices\x00"))
+	gl.Uniform1iv(lsi, int32(len(GridSizes)), &LevelStartIndices[0])
+
+	gsi := gl.GetUniformLocation(program, gl.Str("GridSizes\x00"))
+	gl.Uniform1iv(gsi, int32(len(GridSizes)), &GridSizes[0])
+
 }
