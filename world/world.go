@@ -2,7 +2,6 @@ package world
 
 import (
 	Log "VoxelRPG/logging"
-	"fmt"
 	"runtime"
 	"strconv"
 	"sync"
@@ -10,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/go-gl/gl/v4.6-core/gl"
+	"github.com/go-gl/mathgl/mgl32"
 )
 
 var (
@@ -28,6 +28,19 @@ func (w *World) Update(shaderProgram uint32) {
 
 	w.UploadCombinedOctree(shaderProgram)
 
+}
+
+func (w *World) UpdateIfNeeded(shaderProgram uint32, viewProjection mgl32.Mat4, cameraPos mgl32.Vec3) {
+	currentChunk := GetCameraChunk(cameraPos)
+
+	if currentChunk == w.LastCameraChunk {
+		return // Skip expensive update
+	}
+
+	Log.NewLog("New Camera ChunkPos:", currentChunk, "Pos:", cameraPos)
+
+	w.LastCameraChunk = currentChunk
+	w.Update(shaderProgram)
 }
 
 func (w *World) Populate(shaderProgram uint32) {
@@ -75,7 +88,7 @@ func (w *World) Populate(shaderProgram uint32) {
 
 				resultOutput <- WorldOutput{
 					index: chunkIndex,
-					value: NewChunk(Vec3{uint32(x), uint32(y), uint32(z)}),
+					value: NewChunk(Vec3{int32(x), int32(y), int32(z)}),
 				}
 
 			}
@@ -95,8 +108,6 @@ func (w *World) Populate(shaderProgram uint32) {
 
 	Log.NewLog("World generation took:", time.Since(StartedWorldGen))
 
-	w.Update(shaderProgram)
-
 }
 
 func (w *World) GetRootOffsets() []uint32 {
@@ -114,9 +125,6 @@ func (w *World) GetRootOffsets() []uint32 {
 func (w *World) UploadCombinedOctree(shaderProgram uint32) {
 
 	gpuNodes := BuildCombinedOctreeData(w.Chunks)
-
-	fmt.Println(unsafe.Offsetof(GridNodeFlatGPU{}.Children)) // should be multiple of 16
-	fmt.Println(unsafe.Sizeof(GridNodeFlatGPU{}))
 
 	w.UploadCombinedOctreeSSBO(gpuNodes, shaderProgram)
 
@@ -175,6 +183,12 @@ func (w *World) SendGPUBuffers(nodes []GridNodeFlatGPU, shaderProgram uint32) {
 
 	chunkNumberUniform := gl.GetUniformLocation(shaderProgram, gl.Str("numChunks\x00"))
 	gl.Uniform1ui(chunkNumberUniform, uint32(ChunkNum))
+
+	chunkSizeUniform := gl.GetUniformLocation(shaderProgram, gl.Str("chunkSize\x00"))
+	gl.Uniform1f(chunkSizeUniform, float32(CHUNK_SIZE))
+
+	chunkScaleUniform := gl.GetUniformLocation(shaderProgram, gl.Str("chunkScale\x00"))
+	gl.Uniform1f(chunkScaleUniform, CHUNK_SCALE)
 
 	/* -- [[ Send over the chunk information itself ]] -- */
 

@@ -1,6 +1,7 @@
 package world
 
 import (
+	"math/rand"
 	"runtime"
 	"sync"
 	"time"
@@ -14,8 +15,17 @@ import (
 
 func IsBlockFull(x, y, z int) bool {
 
-	hash := uint32(x*73856093 ^ y*19349663 ^ z*83492791)
-	return (hash & 255) > 50
+	return rand.Float32() > 0.5
+
+}
+
+func VoxelMetadata(idx int) GridMetadata {
+
+	return GridMetadata{
+		R: rand.Uint32() % 256,
+		G: rand.Uint32() % 256,
+		B: rand.Uint32() % 256,
+	}
 
 }
 
@@ -76,7 +86,7 @@ func (chunk *Chunk) IsVisible(viewProjection mgl32.Mat4) bool {
 
 func (chunk *Chunk) GenerateVoxelData() {
 
-	ByteNumber := (FULL_CHUNK_SIZE + 7) / 8
+	ByteNumber := FULL_CHUNK_SIZE //(FULL_CHUNK_SIZE + 7) / 8
 	BatchSizes := ByteNumber / CHUNK_WORKERS
 
 	var chunkAwait sync.WaitGroup
@@ -97,22 +107,15 @@ func (chunk *Chunk) GenerateVoxelData() {
 
 			for voxelIndex := start; voxelIndex < end; voxelIndex++ {
 
-				var value uint8
+				m := chunk.Position.MulScalar(int32(CHUNK_SIZE))
 
-				for byteIndex := 0; byteIndex < 8; byteIndex++ {
+				x := voxelIndex % CHUNK_SIZE
+				y := (voxelIndex / CHUNK_SIZE) % CHUNK_SIZE
+				z := voxelIndex / (CHUNK_SIZE * CHUNK_SIZE)
 
-					trueVI := voxelIndex + byteIndex
+				isFull := IsBlockFull(int(m.X)+x, int(m.Y)+y, int(m.Z)+z)
 
-					x := trueVI % CHUNK_SIZE
-					y := (trueVI / CHUNK_SIZE) % CHUNK_SIZE
-					z := trueVI / (CHUNK_SIZE * CHUNK_SIZE)
-
-					isFull := IsBlockFull(x, y, z)
-					value = chunkSetVoxelBit(value, byteIndex, isFull)
-
-				}
-
-				chunk.Voxels[voxelIndex] = value
+				chunkSetVoxelBit(chunk.Voxels, voxelIndex, isFull)
 
 			}
 

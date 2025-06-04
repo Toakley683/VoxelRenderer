@@ -2,6 +2,9 @@ package world
 
 import (
 	Log "VoxelRPG/logging"
+	"math"
+
+	"github.com/go-gl/mathgl/mgl32"
 )
 
 const (
@@ -10,6 +13,8 @@ const (
 
 	CHUNK_SIZE          int = 32
 	VERTICAL_CHUNK_SIZE int = 32
+
+	CHUNK_SCALE float32 = 1.0 //1.0 / 32.0 // How many units across is a chunk
 
 	VOXEL_SIZE int = 1
 	GRID_SIZES int = 6
@@ -20,14 +25,17 @@ const (
 )
 
 var (
-	RENDER_DISTANCE         int  = 8
+	RENDER_DISTANCE         int  = 2
 	RENDER_DISTANCE_POINTER *int = &RENDER_DISTANCE
 )
 
-type Vec3 struct{ X, Y, Z uint32 }
+type Vec3 struct{ X, Y, Z int32 }
 
 func (v Vec3) Add(o Vec3) Vec3 {
 	return Vec3{X: v.X + o.X, Y: v.Y + o.Y, Z: v.Z + o.Z}
+}
+func (v Vec3) MulScalar(o int32) Vec3 {
+	return Vec3{X: v.X * o, Y: v.Y * o, Z: v.Z * o}
 }
 
 type Chunk struct {
@@ -39,8 +47,9 @@ type Chunk struct {
 }
 
 type World struct {
-	RenderCenter   *Vec3
-	RenderDistance *int
+	RenderCenter    *Vec3
+	RenderDistance  *int
+	LastCameraChunk Vec3
 
 	Chunks []*Chunk
 
@@ -48,13 +57,31 @@ type World struct {
 	WorldInfoSSBO uint32
 }
 
+/* -- [[ Camera Chunking ]] -- */
+
+func GetCameraChunk(pos mgl32.Vec3) Vec3 {
+	fChunk := float64(CHUNK_SIZE)
+
+	return Vec3{
+		X: int32(math.Floor(float64(pos.X())/fChunk) * fChunk),
+		Y: int32(math.Floor(float64(pos.Y())/fChunk) * fChunk),
+		Z: int32(math.Floor(float64(pos.Z())/fChunk) * fChunk),
+	}
+}
+
 /* -- [[ Voxel Bit Packing ]] -- */
 
-func chunkSetVoxelBit(b uint8, bitIndex int, val bool) uint8 {
-	if val {
-		return b | (1 << bitIndex)
+func chunkSetVoxelBit(chunkData []uint8, idx int, value bool) {
+	byteIndex := idx / 8
+	bitIndex := uint(idx % 8)
+
+	if value {
+		// Set the bit
+		chunkData[byteIndex] |= (1 << bitIndex)
+	} else {
+		// Clear the bit
+		chunkData[byteIndex] &^= (1 << bitIndex) // &^ is bit clear (AND NOT) in Go
 	}
-	return b
 }
 
 func chunkGetVoxelBit(chunkData []uint8, idx int) bool {

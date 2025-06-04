@@ -29,19 +29,20 @@ layout(std430, binding = 0) buffer NodeBuffer {
 };
 
 uniform uint numChunks;
+uniform float chunkSize;
+uniform float chunkScale;
 
 layout(std430, binding = 1) buffer ChunkInfoBuffer {
     ChunkInfo chunksInformation[];
 };
 
-int chunkSize = 32;
 uint MaxUINT32 = 0xFFFFFFFFu;
 
 in vec2 fragTexCoord;
 
 uniform vec2 iResolution;
 uniform vec3 camPos;
-uniform mat4 camera;
+uniform mat4 invView;
 
 // Return true if the ray intersects an AABB, and set near/far distances
 bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tNear, out float tFar) {
@@ -79,7 +80,7 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
     int rootNodeIndex = int(chunksInformation[chunkIndex].RootOffset);
 
     stack[stackSize] = rootNodeIndex;
-    stackPos[stackSize] = vec3(chunksInformation[chunkIndex].ChunkPos) * float(chunkSize);
+    stackPos[stackSize] = vec3(chunksInformation[chunkIndex].ChunkPos) * float(chunkSize * chunkScale);
     stackSize++;
 
     while (stackSize > 0) {
@@ -92,9 +93,9 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
         if (nodeIndex >= nodes.length()) continue;
 
         GridNodeFlat node = nodes[nodeIndex];
-        int size = node.size;
+        float size = node.size;
         vec3 boxMin = nodePos;
-        vec3 boxMax = nodePos + vec3(size);
+        vec3 boxMax = nodePos + vec3(size * chunkScale);
 
         float tNear, tFar;
         if (!intersectAABB(ro, rd, boxMin, boxMax, tNear, tFar)) {
@@ -143,7 +144,7 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
 
             //if ( !flagInfo.occupied ) continue;
 
-            float size = child.size;
+            float size = child.size * chunkScale;
             vec3 childPos = nodePos + vec3(i & 1, (i >> 1) & 1, (i >> 2) & 1) * size; 
 
             vec3 minSize = childPos;
@@ -190,16 +191,16 @@ void main() {
     vec4 rayClip = vec4(uv, -1.0, 1.0);
 
     vec3 rd_view = normalize(vec3(uv, -1.0));  // ray direction in view space
-    vec3 rd = normalize((inverse(camera) * vec4(rd_view, 0.0)).xyz);
+    vec3 rd = normalize((invView * vec4(rd_view, 0.0)).xyz);
 
     float closestT = 1e30;
     vec4 finalColor = vec4(0.0);
     bool foundHit = false;
 
     for (uint chunkIndex = 0u; chunkIndex < numChunks; ++chunkIndex) {
-        vec3 chunkWorldPos = vec3(chunksInformation[chunkIndex].ChunkPos) * float(chunkSize);
+        vec3 chunkWorldPos = vec3(chunksInformation[chunkIndex].ChunkPos) * float(chunkSize*chunkScale);
         vec3 bmin = chunkWorldPos;
-        vec3 bmax = chunkWorldPos + vec3(chunkSize);
+        vec3 bmax = chunkWorldPos + vec3(chunkSize*chunkScale);
 
         float tNear, tFar;
         if (!intersectAABB(ro, rd, bmin, bmax, tNear, tFar)) {
@@ -222,7 +223,7 @@ void main() {
     if (foundHit) {
         FragColor = finalColor;
     } else {
-        discard;
+        FragColor = vec4( vec3(0.3), 1.0 );
     }
 
 }

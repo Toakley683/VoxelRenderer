@@ -11,13 +11,18 @@ import (
 )
 
 var (
-	vao           uint32
-	shaderProgram uint32
-	texture       uint32
+	screenVAO           uint32
+	shaderProgram       uint32
+	screenShaderProgram uint32
+
+	fbo        uint32
+	fboTexture uint32
 
 	FOV   float32
 	ZNear float32
 	ZFar  float32
+
+	Scaledown float32
 )
 
 func NewGLContext() error {
@@ -67,20 +72,14 @@ func setupPerspectives(window *WindowBuilder, client *Client.ClientContext) {
 
 }
 
-func setupBuffers() {
+func setupShaders() {
 
-	var err error
+	/* --[[ Main Screen Shader ]] */
 
-	/* --[[ Create Shaders ]] */
-
-	// Create Vertex Shader
-
-	vertex_shader, err := NewShader("vertex_shader.glsl", gl.VERTEX_SHADER)
+	vertex_shader, err := NewShader("octree_traverse.vert", gl.VERTEX_SHADER)
 	CheckError(err)
 
-	// Create Fragment Shader
-
-	fragment_shader, err := NewShader("ray_march_frag.glsl", gl.FRAGMENT_SHADER)
+	fragment_shader, err := NewShader("octree_traverse.frag", gl.FRAGMENT_SHADER)
 	CheckError(err)
 
 	shaders := []uint32{
@@ -91,33 +90,48 @@ func setupBuffers() {
 	shaderProgram, err = NewShaderProgram(shaders)
 	CheckError(err)
 
-	gl.UseProgram(shaderProgram)
+	/* --[[ Upscaled Texture Shader ]] */
 
-	textureUniform := gl.GetUniformLocation(shaderProgram, gl.Str("tex\x00"))
-	gl.Uniform1i(textureUniform, 0)
-
-	gl.BindFragDataLocation(shaderProgram, 0, gl.Str("outputColor\x00"))
-
-	texture, err = NewTexture("square.png")
+	vertex_shader, err = NewShader("screen.vert", gl.VERTEX_SHADER)
 	CheckError(err)
+
+	fragment_shader, err = NewShader("screen.frag", gl.FRAGMENT_SHADER)
+	CheckError(err)
+
+	shaders = []uint32{
+		vertex_shader,
+		fragment_shader,
+	}
+
+	screenShaderProgram, err = NewShaderProgram(shaders)
+	CheckError(err)
+
+}
+
+func setupBuffers(window *WindowBuilder) {
+
+	/* --[[ Create Shaders ]] */
+
+	setupShaders()
 
 	/* --[[ Create VAO (Vertex Array Object) ]] */
 
-	vao = NewVertexArray(1)
+	gl.UseProgram(shaderProgram)
 
-	/* --[[ Create Buffers ]] */
-
-	// Make static buffer object with cube verticies
+	screenVAO = NewVertexArray(1)
 
 	NewBufferObject(1, gl.ARRAY_BUFFER, func(_ uint32) {
 		gl.BufferData(gl.ARRAY_BUFFER, len(fullscreenQuadVertices)*4, gl.Ptr(fullscreenQuadVertices), gl.STATIC_DRAW)
 	})
 
-	// Set offset from our vertex buffer object to allow it to read verticies correctly
+	resUniform := gl.GetUniformLocation(shaderProgram, gl.Str("iResolution\x00"))
+	gl.Uniform2f(resUniform, float32(window.Width), float32(window.Height))
 
 	vertAttrib := uint32(gl.GetAttribLocation(shaderProgram, gl.Str("vert\x00")))
 	gl.VertexAttribPointerWithOffset(vertAttrib, 2, gl.FLOAT, false, 4*4, 0)
 	gl.EnableVertexAttribArray(vertAttrib)
+
+	// Set offset from our vertex buffer object to allow it to read verticies correctly
 
 	texCoordAttrib := uint32(gl.GetAttribLocation(shaderProgram, gl.Str("vertTexCoord\x00")))
 	gl.EnableVertexAttribArray(texCoordAttrib)
@@ -129,10 +143,34 @@ func setupBuffers() {
 	/* --[[ Setup Octtree ]] */
 
 	World.MainWorld.Populate(shaderProgram)
+	World.MainWorld.Update(shaderProgram)
 
 	Log.NewLog("Total Voxel Count:", ((World.RENDER_DISTANCE * World.RENDER_DISTANCE * World.RENDER_DISTANCE) * (World.CHUNK_SIZE * World.CHUNK_SIZE * World.CHUNK_SIZE)))
 
-	//Log.NewLog(chunk)
+	/* --[[ Frame Buffer Object for rendering world at low resolutions ]] */
+
+	Scaledown = 1.5
+
+	gl.UseProgram(screenShaderProgram)
+
+	gl.GenFramebuffers(1, &fbo)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+
+	gl.GenTextures(1, &fboTexture)
+	gl.BindTexture(gl.TEXTURE_2D, fboTexture)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, int32(float32(window.Width)/Scaledown), int32(float32(window.Height)/Scaledown), 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTexture, 0)
+
+	if gl.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
+		Log.NewLog("ERROR: Framebuffer is not complete")
+	}
+
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 
 }
 
@@ -145,7 +183,7 @@ func OpenGLSetup(window *WindowBuilder, client *Client.ClientContext) {
 	gl.DepthFunc(gl.LESS)
 	gl.ClearColor(0.3, 0.3, 0.3, 1.0)
 
-	setupBuffers()
+	setupBuffers(window)
 
 	/* --[[ Setup Perspective ]] */
 
@@ -156,20 +194,55 @@ func OpenGLSetup(window *WindowBuilder, client *Client.ClientContext) {
 
 }
 
+func ResizeFramebuffer(fbo uint32, texture *uint32, width, height int) {
+	scaledWidth := int32(float32(width) / Scaledown)
+	scaledHeight := int32(float32(height) / Scaledown)
+
+	// Reallocate texture storage
+	gl.BindTexture(gl.TEXTURE_2D, *texture)
+	gl.TexImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGBA8,
+		scaledWidth,
+		scaledHeight,
+		0,
+		gl.RGBA,
+		gl.UNSIGNED_BYTE,
+		nil,
+	)
+
+	// Reattach texture to framebuffer
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.FramebufferTexture2D(
+		gl.FRAMEBUFFER,
+		gl.COLOR_ATTACHMENT0,
+		gl.TEXTURE_2D,
+		*texture,
+		0,
+	)
+
+	// Check FBO completeness
+	if gl.CheckFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE {
+		Log.NewLog("ERROR: Framebuffer is not complete after resize!")
+	}
+
+	// Unbind to avoid side effects
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+}
+
 func OnWindowResize(w *glfw.Window, width int, height int, wBuild *WindowBuilder) {
 
 	// Change OpenGL viewport to the new window size
 
-	Log.NewLog("New Size - W:", width, "H:", height)
+	Log.NewLog("New Size - W:", width, "H:", height, "Aspect:", float32(wBuild.Width)/float32(wBuild.Height))
 
 	gl.Viewport(0, 0, int32(width), int32(height))
 
 	wBuild.Width = width
 	wBuild.Height = height
 
-	resUniform := gl.GetUniformLocation(shaderProgram, gl.Str("iResolution\x00"))
-	gl.Uniform2f(resUniform, float32(wBuild.Width), float32(wBuild.Height))
-
+	ResizeFramebuffer(fbo, &fboTexture, width, height)
 }
 
 func OpenGLFixedUpdate(window *glfw.Window, windowBuilder *WindowBuilder) {
@@ -184,40 +257,63 @@ func OpenGLFixedUpdate(window *glfw.Window, windowBuilder *WindowBuilder) {
 
 	}
 
-	projection := mgl32.Perspective(mgl32.DegToRad(FOV), float32(windowBuilder.Width)/float32(windowBuilder.Height), ZNear, ZFar)
-	projectionUniform := gl.GetUniformLocation(shaderProgram, gl.Str("projection\x00"))
-	gl.UniformMatrix4fv(projectionUniform, 1, false, &projection[0])
-
 }
 
 func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 
-	// Runs every frame
+	Log.NewLog("Camera Pos:", cam.Pos, "Chunk Pos:", World.GetCameraChunk(cam.Pos))
 
+	// === First Pass: Render raymarcher to half-resolution FBO ===
+
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.Viewport(0, 0, int32(float32(windowBuilder.Width)/Scaledown), int32(float32(windowBuilder.Height)/Scaledown))
 	gl.UseProgram(shaderProgram)
-	gl.BindVertexArray(vao)
+	gl.BindVertexArray(screenVAO)
 
-	// Update Camera Matrix
+	// === Camera Setup ===
 
 	view := mgl32.LookAtV(
 		cam.Pos,
 		mgl32.Vec3{cam.Pos[0] + cam.Front[0], cam.Pos[1] + cam.Front[1], cam.Pos[2] + cam.Front[2]},
 		mgl32.Vec3{0, 1, 0},
 	)
+	invView := view.Inv()
 
-	cameraUniform := gl.GetUniformLocation(shaderProgram, gl.Str("camera\x00"))
-	gl.UniformMatrix4fv(cameraUniform, 1, false, &view[0])
+	projection := mgl32.Perspective(mgl32.DegToRad(FOV), float32(windowBuilder.Width)/Scaledown/float32(windowBuilder.Height)/Scaledown, ZNear, ZFar)
+	viewProjection := projection.Mul4(view)
 
-	camPosUniform := gl.GetUniformLocation(shaderProgram, gl.Str("camPos\x00"))
-	gl.Uniform3f(camPosUniform, cam.Pos[0], cam.Pos[1], cam.Pos[2])
+	// === Uniform Uploads ===
 
-	timeUniform := gl.GetUniformLocation(shaderProgram, gl.Str("iTime\x00"))
-	gl.Uniform1f(timeUniform, float32(glfw.GetTime()))
+	loc := gl.GetUniformLocation(shaderProgram, gl.Str("invView\x00"))
 
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.UniformMatrix4fv(loc, 1, false, &invView[0])
+	gl.UniformMatrix4fv(gl.GetUniformLocation(shaderProgram, gl.Str("projection\x00")), 1, false, &projection[0])
+	gl.Uniform3f(gl.GetUniformLocation(shaderProgram, gl.Str("camPos\x00")), cam.Pos[0], cam.Pos[1], cam.Pos[2])
+	gl.Uniform1f(gl.GetUniformLocation(shaderProgram, gl.Str("iTime\x00")), float32(glfw.GetTime()))
+	gl.Uniform2f(gl.GetUniformLocation(shaderProgram, gl.Str("iResolution\x00")), float32(windowBuilder.Width)/float32(Scaledown), float32(windowBuilder.Height)/float32(Scaledown))
+
+	// === Bind SSBO ===
 
 	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, World.MainWorld.CombinedSSBO)
+
+	// === Update World if required ===
+
+	World.MainWorld.UpdateIfNeeded(shaderProgram, viewProjection, cam.Pos)
+
+	// === Draw Fullscreen Quad ===
+
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+
+	// === Second Pass: Blot to full-resolution screen ===
+
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gl.Viewport(0, 0, int32(windowBuilder.Width), int32(windowBuilder.Height))
+	gl.UseProgram(screenShaderProgram)
+	gl.BindVertexArray(screenVAO)
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, fboTexture)
+	gl.Uniform1i(gl.GetUniformLocation(screenShaderProgram, gl.Str("tex\x00")), 0)
 
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 

@@ -1,7 +1,6 @@
 package world
 
 import (
-	"math/rand"
 	"runtime"
 	"runtime/debug"
 )
@@ -15,16 +14,6 @@ func GetChildIndex(parentIndex int, parentLevel int) int {
 	relParentIdx := parentIndex - int(LevelStartIndices[parentLevel])
 	childBase := int(LevelStartIndices[childLevel]) + (relParentIdx * 8)
 	return childBase
-}
-
-func VoxelMetadata(idx int) GridMetadata {
-
-	return GridMetadata{
-		R: rand.Uint32() % 256,
-		G: rand.Uint32() % 256,
-		B: rand.Uint32() % 256,
-	}
-
 }
 
 func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlatGPU) ([]GridNodeFlatGPU, int) {
@@ -62,9 +51,9 @@ func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlatGPU) ([]GridNode
 
 			baseX, baseY, baseZ := x*2, y*2, z*2
 
-			for i := uint32(0); i < 8; i++ {
+			for i := int32(0); i < 8; i++ {
 
-				Pos := Vec3{X: uint32(baseX), Y: uint32(baseY), Z: uint32(baseZ)}.Add(Vec3{
+				Pos := Vec3{X: int32(baseX), Y: int32(baseY), Z: int32(baseZ)}.Add(Vec3{
 					X: i & 1,
 					Y: (i >> 1) & 1,
 					Z: (i >> 2) & 1,
