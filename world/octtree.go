@@ -1,91 +1,12 @@
 package world
 
 import (
-	Log "VoxelRPG/logging"
 	"math/rand"
-	"unsafe"
-
-	"github.com/go-gl/gl/v4.6-core/gl"
+	"runtime"
+	"runtime/debug"
 )
 
-var (
-	GridSizes         []int32
-	LevelStartIndices []int32
-	NodesRequired     int
-
-	FlagOccupied uint32 = 1 << 0
-	FlagLeaf     uint32 = 1 << 1
-
-	MaxUINT32 uint32 = 0xFFFFFFFF
-)
-
-type GridMetadata struct {
-	R uint32
-	G uint32
-	B uint32
-	_ uint32
-}
-
-type GridNodeFlat struct {
-	Flags    uint32
-	Children [8]uint32 // index of first child, or -1 if leaf
-	Size     int32
-	Metadata GridMetadata
-}
-
-type GridNodeFlatGPU struct {
-	Flags    uint32
-	Children [8]uint32
-	Size     int32
-	Metadata GridMetadata
-}
-
-func init() {
-
-	GridSizes = GenerateGridSizes(CHUNK_SIZE, GRID_SIZES)
-	Log.NewLog("Grid sizes per level", GridSizes)
-
-	NodesRequired = CalculateTotalNodes(GridSizes, GRID_SIZES)
-	Log.NewLog("Nodes required", NodesRequired)
-
-	LevelStartIndices = make([]int32, len(GridSizes))
-
-	for i := 0; i < len(GridSizes); i++ {
-
-		LevelStartIndices[i] = int32(CalculateTotalNodes(GridSizes, int(i-1)))
-
-	}
-
-	Log.NewLog("Indicies:", LevelStartIndices)
-
-}
-
-func GenerateGridSizes(maxSize, levels int) []int32 {
-	sizes := make([]int32, levels)
-	size := maxSize
-	for i := levels - 1; i >= 0; i-- {
-		Log.NewLog(i)
-		sizes[i] = int32(size)
-		if size > 1 {
-			size = size / 2
-		}
-	}
-	return sizes
-}
-
-func CalculateTotalNodes(sizes []int32, maxLevel int) int {
-	total := 0
-	for level, size := range sizes {
-		if level > maxLevel {
-			return total
-		}
-
-		total += int(size * size * size)
-	}
-	return total
-}
-
-func GetChildIndex(parentIndex int, parentLevel int, childNum int) int {
+func GetChildIndex(parentIndex int, parentLevel int) int {
 	if parentLevel < 0 || parentLevel >= len(GridSizes)-1 {
 		return -1
 	}
@@ -93,7 +14,7 @@ func GetChildIndex(parentIndex int, parentLevel int, childNum int) int {
 	childLevel := parentLevel + 1
 	relParentIdx := parentIndex - int(LevelStartIndices[parentLevel])
 	childBase := int(LevelStartIndices[childLevel]) + (relParentIdx * 8)
-	return childBase + childNum
+	return childBase
 }
 
 func VoxelMetadata(idx int) GridMetadata {
@@ -106,30 +27,7 @@ func VoxelMetadata(idx int) GridMetadata {
 
 }
 
-func IndexToCoords(idx, size int) (x, y, z int) {
-	x = idx % size
-	y = (idx / size) % size
-	z = idx / (size * size)
-	return
-}
-
-func CoordsToIndex(x, y, z, size int) int {
-	return x + y*size + z*size*size
-}
-
-type FlagBits struct {
-	Occupied bool
-	Leaf     bool
-}
-
-func DecodeFlags(flags uint32) FlagBits {
-	return FlagBits{
-		Occupied: flags&FlagOccupied != 0,
-		Leaf:     flags&FlagLeaf != 0,
-	}
-}
-
-func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlat) ([]GridNodeFlat, int) {
+func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlatGPU) ([]GridNodeFlatGPU, int) {
 
 	S := int32(GridSizes[(GRID_SIZES-1)-gridID])
 	Size := int32(GridSizes[gridID])
@@ -140,7 +38,7 @@ func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlat) ([]GridNodeFla
 	for idx := 0; idx < int(idxMax); idx++ {
 
 		parentGlobalIdx := startIndex + idx
-		cIndex := int32(GetChildIndex(parentGlobalIdx, gridID, 0))
+		cIndex := int32(GetChildIndex(parentGlobalIdx, gridID))
 
 		children := [8]uint32{
 			MaxUINT32, MaxUINT32, MaxUINT32, MaxUINT32,
@@ -151,7 +49,7 @@ func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlat) ([]GridNodeFla
 
 		if cIndex == -1 {
 
-			if chunk.Voxels[idx] {
+			if chunkGetVoxelBit(chunk.Voxels, idx) {
 				flags |= FlagOccupied
 			}
 			flags |= FlagLeaf
@@ -193,7 +91,7 @@ func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlat) ([]GridNodeFla
 
 		}
 
-		nodeList[parentGlobalIdx] = GridNodeFlat{
+		nodeList[parentGlobalIdx] = GridNodeFlatGPU{
 			Flags:    flags,
 			Children: children,
 			Size:     S,
@@ -206,9 +104,9 @@ func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlat) ([]GridNodeFla
 
 }
 
-func (chunk *Chunk) BuildNestedGrid() ([]GridNodeFlat, int) {
+func (chunk *Chunk) BuildNestedGrid() []GridNodeFlatGPU {
 
-	var Nodes []GridNodeFlat = make([]GridNodeFlat, NodesRequired)
+	var Nodes []GridNodeFlatGPU = make([]GridNodeFlatGPU, NodesRequired)
 
 	for i := GRID_SIZES - 1; i >= 0; i-- {
 
@@ -216,27 +114,38 @@ func (chunk *Chunk) BuildNestedGrid() ([]GridNodeFlat, int) {
 
 	}
 
-	return Nodes, 0
+	return Nodes
 
 }
 
-func ConvertToGPU(nodes []GridNodeFlat) []GridNodeFlatGPU {
-	gpuNodes := make([]GridNodeFlatGPU, len(nodes))
-	for i, n := range nodes {
-		gpuNodes[i] = GridNodeFlatGPU(n)
-	}
-	return gpuNodes
-}
+func BuildCombinedOctreeData(chunks []*Chunk) []GridNodeFlatGPU {
 
-func (chunk *Chunk) UploadOctreeSSBO(nodes []GridNodeFlat) {
-	gpuNodes := ConvertToGPU(nodes)
+	totalNodes := 0
 
-	if chunk.SSBO == 0 {
-		gl.GenBuffers(1, &chunk.SSBO)
+	for i := 0; i < len(chunks); i++ {
+		chunks[i].BuildNodes()
+		nodeCount := len(chunks[i].OctreeNodes)
+		totalNodes += nodeCount
 	}
-	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, chunk.SSBO)
-	gl.BufferData(gl.SHADER_STORAGE_BUFFER, len(gpuNodes)*int(unsafe.Sizeof(gpuNodes[0])), gl.Ptr(gpuNodes), gl.DYNAMIC_DRAW)
-	// Bind the buffer to binding point 0 (match GLSL layout(binding = 0))
-	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, chunk.SSBO)
-	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
+
+	combined := make([]GridNodeFlatGPU, totalNodes)
+
+	var currentOffset int = 0
+
+	for _, chunk := range chunks {
+
+		chunk.OctreeOffset = uint32(currentOffset)
+
+		copy(combined[currentOffset:], chunk.OctreeNodes)
+
+		currentOffset += len(chunk.OctreeNodes)
+
+		chunk.OctreeNodes = nil
+
+	}
+
+	runtime.GC()
+	debug.FreeOSMemory()
+
+	return combined
 }

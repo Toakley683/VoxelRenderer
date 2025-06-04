@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/go-gl/glfw/v3.3/glfw"
+
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -114,7 +116,7 @@ func renderLoop(window *glfw.Window) {
 
 		}
 
-		Types.OpenGLUpdate(Client.Camera)
+		Types.OpenGLUpdate(Client.Camera, WindowBuilder)
 
 		glfw.PollEvents()
 		window.SwapBuffers()

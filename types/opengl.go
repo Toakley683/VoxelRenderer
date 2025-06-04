@@ -130,6 +130,8 @@ func setupBuffers() {
 
 	World.MainWorld.Populate(shaderProgram)
 
+	Log.NewLog("Total Voxel Count:", ((World.RENDER_DISTANCE * World.RENDER_DISTANCE * World.RENDER_DISTANCE) * (World.CHUNK_SIZE * World.CHUNK_SIZE * World.CHUNK_SIZE)))
+
 	//Log.NewLog(chunk)
 
 }
@@ -188,7 +190,7 @@ func OpenGLFixedUpdate(window *glfw.Window, windowBuilder *WindowBuilder) {
 
 }
 
-func OpenGLUpdate(cam *Client.Camera) {
+func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 
 	// Runs every frame
 
@@ -215,13 +217,8 @@ func OpenGLUpdate(cam *Client.Camera) {
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
 
-	for _, chunk := range World.MainWorld.Chunks {
+	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, World.MainWorld.CombinedSSBO)
 
-		gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, chunk.SSBO)
-		chunk.SetChunkPositionUniform(shaderProgram)
-
-		gl.DrawArrays(gl.TRIANGLES, 0, 6)
-
-	}
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 
 }
