@@ -1,6 +1,7 @@
 package world
 
 import (
+	Log "VoxelRPG/logging"
 	"runtime"
 	"runtime/debug"
 )
@@ -68,11 +69,10 @@ func (chunk *Chunk) NewLevel(gridID int, nodeList []GridNodeFlatGPU) ([]GridNode
 
 				childNode := nodeList[childGlobalIdx]
 
-				children[i] = uint32(childGlobalIdx)
-
 				f := DecodeFlags(childNode.Flags)
 
 				if f.Occupied {
+					children[i] = uint32(childGlobalIdx)
 					flags |= FlagOccupied
 				}
 
@@ -116,6 +116,8 @@ func BuildCombinedOctreeData(chunks []*Chunk) []GridNodeFlatGPU {
 		nodeCount := len(chunks[i].OctreeNodes)
 		totalNodes += nodeCount
 	}
+
+	Log.NewLog("Octree Length:", totalNodes)
 
 	combined := make([]GridNodeFlatGPU, totalNodes)
 

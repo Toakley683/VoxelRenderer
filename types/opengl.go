@@ -1,6 +1,9 @@
 package types
 
 import (
+	"fmt"
+	"unsafe"
+
 	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/go-gl/mathgl/mgl32"
@@ -149,7 +152,7 @@ func setupBuffers(window *WindowBuilder) {
 
 	/* --[[ Frame Buffer Object for rendering world at low resolutions ]] */
 
-	Scaledown = 1.5
+	Scaledown = 1
 
 	gl.UseProgram(screenShaderProgram)
 
@@ -261,7 +264,7 @@ func OpenGLFixedUpdate(window *glfw.Window, windowBuilder *WindowBuilder) {
 
 func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 
-	Log.NewLog("Camera Pos:", cam.Pos, "Chunk Pos:", World.GetCameraChunk(cam.Pos))
+	//Log.NewLog("Camera Pos:", cam.Pos, "Chunk Pos:", World.GetCameraChunk(cam.Pos))
 
 	// === First Pass: Render raymarcher to half-resolution FBO ===
 
@@ -280,7 +283,6 @@ func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 	invView := view.Inv()
 
 	projection := mgl32.Perspective(mgl32.DegToRad(FOV), float32(windowBuilder.Width)/Scaledown/float32(windowBuilder.Height)/Scaledown, ZNear, ZFar)
-	viewProjection := projection.Mul4(view)
 
 	// === Uniform Uploads ===
 
@@ -291,6 +293,7 @@ func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 	gl.Uniform3f(gl.GetUniformLocation(shaderProgram, gl.Str("camPos\x00")), cam.Pos[0], cam.Pos[1], cam.Pos[2])
 	gl.Uniform1f(gl.GetUniformLocation(shaderProgram, gl.Str("iTime\x00")), float32(glfw.GetTime()))
 	gl.Uniform2f(gl.GetUniformLocation(shaderProgram, gl.Str("iResolution\x00")), float32(windowBuilder.Width)/float32(Scaledown), float32(windowBuilder.Height)/float32(Scaledown))
+	gl.Uniform1f(gl.GetUniformLocation(shaderProgram, gl.Str("fov\x00")), FOV)
 
 	// === Bind SSBO ===
 
@@ -298,7 +301,7 @@ func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 
 	// === Update World if required ===
 
-	World.MainWorld.UpdateIfNeeded(shaderProgram, viewProjection, cam.Pos)
+	//World.MainWorld.UpdateIfNeeded(shaderProgram, projection.Mul4(view), cam.Pos)
 
 	// === Draw Fullscreen Quad ===
 
@@ -316,5 +319,36 @@ func OpenGLUpdate(cam *Client.Camera, windowBuilder *WindowBuilder) {
 	gl.Uniform1i(gl.GetUniformLocation(screenShaderProgram, gl.Str("tex\x00")), 0)
 
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+
+	if World.DEBUG_MODE == true {
+
+		gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, World.MainWorld.DebugResultSSBO)
+		ptr := gl.MapBuffer(gl.SHADER_STORAGE_BUFFER, gl.READ_ONLY)
+		if ptr == nil {
+			panic("Failed to map debug result SSBO")
+		}
+
+		var outResult struct {
+			x float32
+			y float32
+			z float32
+		}
+
+		memcpy := unsafe.Slice((*byte)(ptr), unsafe.Sizeof(outResult))
+		copy((*[unsafe.Sizeof(outResult)]byte)(unsafe.Pointer(&outResult))[:], memcpy)
+
+		gl.UnmapBuffer(gl.SHADER_STORAGE_BUFFER)
+		gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
+
+		if outResult.z != 1000 {
+
+			fmt.Printf("\n")
+
+			fmt.Println("Debug result: Data:", outResult)
+			fmt.Printf("\n")
+
+		}
+
+	}
 
 }

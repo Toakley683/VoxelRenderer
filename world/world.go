@@ -168,6 +168,13 @@ func (w *World) UploadCombinedOctreeSSBO(nodes []GridNodeFlatGPU, shaderProgram 
 		}
 	}
 
+	if w.WorldInfoOffsetsSSBO == 0 {
+		gl.GenBuffers(1, &w.WorldInfoOffsetsSSBO)
+		if w.WorldInfoOffsetsSSBO == 0 {
+			Log.NewLog("Failed to generate World Info Offset SSBO")
+		}
+	}
+
 	w.SendGPUBuffers(nodes, shaderProgram)
 }
 
@@ -177,18 +184,14 @@ func (w *World) SendGPUBuffers(nodes []GridNodeFlatGPU, shaderProgram uint32) {
 		return
 	}
 
-	ChunkInfo, ChunkNum := w.GetChunkInfo()
+	offsets, chunkInfo, numBuckets := w.GetChunkInfo()
 
 	/* -- [[ Send over the amount of chunks to render ]] -- */
 
-	chunkNumberUniform := gl.GetUniformLocation(shaderProgram, gl.Str("numChunks\x00"))
-	gl.Uniform1ui(chunkNumberUniform, uint32(ChunkNum))
-
-	chunkSizeUniform := gl.GetUniformLocation(shaderProgram, gl.Str("chunkSize\x00"))
-	gl.Uniform1f(chunkSizeUniform, float32(CHUNK_SIZE))
-
-	chunkScaleUniform := gl.GetUniformLocation(shaderProgram, gl.Str("chunkScale\x00"))
-	gl.Uniform1f(chunkScaleUniform, CHUNK_SCALE)
+	gl.Uniform1ui(gl.GetUniformLocation(shaderProgram, gl.Str("numChunks\x00")), uint32(len(w.Chunks)))
+	gl.Uniform1f(gl.GetUniformLocation(shaderProgram, gl.Str("chunkSize\x00")), float32(CHUNK_SIZE))
+	gl.Uniform1f(gl.GetUniformLocation(shaderProgram, gl.Str("chunkScale\x00")), CHUNK_SCALE)
+	gl.Uniform1i(gl.GetUniformLocation(shaderProgram, gl.Str("numBuckets\x00")), int32(numBuckets))
 
 	/* -- [[ Send over the chunk information itself ]] -- */
 
@@ -203,40 +206,59 @@ func (w *World) SendGPUBuffers(nodes []GridNodeFlatGPU, shaderProgram uint32) {
 	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, w.CombinedSSBO)
 	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
 
-	/* -- [[ Send over the Chunk Info (Index Offsets/Chunk Positions) itself ]] -- */
+	/* -- [[ Send over the Chunk Info (Chunk Key & Chunk Root Offsets) itself ]] -- */
 
 	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, w.WorldInfoSSBO)
 
 	gl.BufferData(
 		gl.SHADER_STORAGE_BUFFER,
-		len(ChunkInfo)*int(unsafe.Sizeof(ChunkInfo[0])),
-		gl.Ptr(ChunkInfo), gl.STATIC_DRAW,
+		len(chunkInfo)*int(unsafe.Sizeof(chunkInfo[0])),
+		gl.Ptr(chunkInfo), gl.STATIC_DRAW,
 	)
 
 	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 1, w.WorldInfoSSBO)
 	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
 
-}
+	/* -- [[ Send over the Chunk Info (Offsets) itself ]] -- */
 
-func (w *World) GetChunkInfo() ([]ChunkInfo, uint32) {
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, w.WorldInfoOffsetsSSBO)
 
-	RootOffsets := w.GetRootOffsets()
-	chunkPositions := w.GetChunkPositions()
-	ChunkNum := uint32(len(RootOffsets))
+	gl.BufferData(
+		gl.SHADER_STORAGE_BUFFER,
+		len(offsets)*int(unsafe.Sizeof(offsets[0])),
+		gl.Ptr(offsets), gl.STATIC_DRAW,
+	)
 
-	chunkInformation := make([]ChunkInfo, ChunkNum)
+	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 2, w.WorldInfoOffsetsSSBO)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
 
-	for i := 0; i < int(ChunkNum); i++ {
-
-		Index := (i * 3) + 3
-
-		chunkInformation[i].ChunkPos[0] = chunkPositions[Index-3]
-		chunkInformation[i].ChunkPos[1] = chunkPositions[Index-2]
-		chunkInformation[i].ChunkPos[2] = chunkPositions[Index-1]
-		chunkInformation[i].RootOffset = RootOffsets[i]
+	if DEBUG_MODE == false {
+		return
 	}
 
-	return chunkInformation, ChunkNum
+	// Debugging
+	var result [1]ChunkInfo
+	gl.GenBuffers(1, &w.DebugResultSSBO)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, w.DebugResultSSBO)
+	gl.BufferData(
+		gl.SHADER_STORAGE_BUFFER,
+		int(unsafe.Sizeof(result[0])),
+		nil, gl.DYNAMIC_DRAW,
+	)
+	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 3, w.DebugResultSSBO)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
+
+}
+
+func (w *World) GetChunkInfo() ([]uint32, []MapEntry, int) {
+
+	Displacement, MapEntries, err := BuildPerfectHashTable(w.Chunks)
+
+	if err != nil {
+		panic("GetChunkInfo() error:" + err.Error())
+	}
+
+	return Displacement, MapEntries, len(w.Chunks)
 
 }
 

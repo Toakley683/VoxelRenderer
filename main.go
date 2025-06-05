@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"runtime"
 
 	ClientContext "VoxelRPG/client"
@@ -94,14 +95,14 @@ func renderLoop(window *glfw.Window) {
 	CheckDelta := float32(1) / float32(165)
 	UpdateCheck := float64(0.0)
 
-	//LastCh := glfw.GetTime()
+	LastCh := glfw.GetTime()
 
 	for !window.ShouldClose() {
 
 		Now := glfw.GetTime()
 
-		//Delta := Now - LastCh
-		//LastCh = Now
+		Delta := Now - LastCh
+		LastCh = Now
 
 		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
@@ -110,9 +111,9 @@ func renderLoop(window *glfw.Window) {
 			UpdateCheck = Now + float64(CheckDelta)
 
 			Types.OpenGLFixedUpdate(window, WindowBuilder)
-			ClientContext.ClientCheckMovement(Client, CheckDelta)
+			ClientContext.ClientCheckMovement(Client, float32(1.0)/float32(60.0))
 
-			//Log.NewLog("FPS:", 1/Delta)
+			fmt.Sprintf("FPS:", 1/Delta)
 
 		}
 

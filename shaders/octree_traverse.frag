@@ -1,8 +1,14 @@
-#version 430 core
+#version 450 core
 
+/* -- [[ Shader Inputs ]] -- */
+
+in vec2 fragTexCoord;
+
+/* -- [[ Shader Outputs ]] -- */
 
 out vec4 FragColor;
 
+/* -- [[ Octree Traversal Grid SSBO ]] -- */
 
 struct GridMetadata {
     uint R;
@@ -19,30 +25,129 @@ struct GridNodeFlat {
     GridMetadata metadata;
 };
 
-struct ChunkInfo {
-    ivec3 ChunkPos;
-    uint RootOffset;
-};
 
 layout(std430, binding = 0) buffer NodeBuffer {
     GridNodeFlat nodes[];
 };
 
+/* -- [[ Chunk Info & Hashmap Offsets SSBO ]] -- */
+
+struct ChunkInfo {
+    ivec3 Position;
+    uint offset;
+};
+
+layout(std430, binding = 1) buffer ChunkInfoBuffer {
+    ChunkInfo chunkInfo[];
+};
+
+layout(std430, binding = 2) buffer Offsets {
+    uint displacements[];
+};
+
+/*layout(std430, binding = 3) buffer DebugResult {
+    vec3 debugOutput;
+};*/
+
+/* -- [[ World Variables ]] -- */
+
 uniform uint numChunks;
 uniform float chunkSize;
 uniform float chunkScale;
 
-layout(std430, binding = 1) buffer ChunkInfoBuffer {
-    ChunkInfo chunksInformation[];
-};
-
-uint MaxUINT32 = 0xFFFFFFFFu;
-
-in vec2 fragTexCoord;
+/* -- [[ Shader Variables ]] -- */
 
 uniform vec2 iResolution;
+uniform float fov;
 uniform vec3 camPos;
 uniform mat4 invView;
+
+float resolutionScale = iResolution.y / tan(fov / 2.0);
+
+/* -- [[ Hashmap Variables ]] -- */
+
+uniform int numBuckets;
+
+/* -- [[ Grid Map Variables ]] -- */
+
+uint MAX_STEPS = 24;
+
+struct FaceHit {
+    vec3 normal;
+    vec3 position;
+};
+
+/* -- [[ Global Variables ]] -- */
+
+uint MaxUINT32 = 0xFFFFFFFFu;
+float EPSILON = 1e-4;
+
+/* -- [[ Hashmap Functions ]] -- */
+
+uint hash_u32(uint x) {
+    x ^= x >> 16u;
+    x *= 0x7feb352du;
+    x ^= x >> 15u;
+    x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    return x;
+}
+
+uint hash3D(ivec3 v) {
+    // Convert signed to unsigned (e.g. offset to positive range)
+    uvec3 uv = uvec3(v) + uvec3(0x80000000u);
+
+    // Mix the three components into one uint hash
+    uint h = hash_u32(uv.x);
+    h ^= hash_u32(uv.y) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+    h ^= hash_u32(uv.z) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+
+    return h;
+}
+
+// Example hash functions - MUST match your CPU ones exactly
+uint hash1(ivec3 pos) {
+    return hash3D(pos);
+}
+
+uint hash2(ivec3 pos) {
+    return hash3D(pos * ivec3(0x27d4eb2du, 0x165667b1u, 0x1b873593u));
+}
+
+
+
+ChunkInfo lookupRootOffset(ivec3 chunkPos) {
+    int N = int(chunkInfo.length());
+
+    uint h1Val = hash1(chunkPos) % uint(N);
+    uint h2Val = hash2(chunkPos) % uint(N);
+
+    uint idx = (h1Val + displacements[h2Val]) % uint(N);
+
+    ChunkInfo result;
+    result.offset = 0xFFFFFFFFu;  // MaxUInt32 default for not found
+    result.Position = ivec3(0);
+
+    ChunkInfo entry = chunkInfo[idx];
+
+    if (entry.offset == 0xFFFFFFFFu) {
+        return result; // Not found
+    }
+
+    // Verify position to avoid false positives
+    if (entry.Position != chunkPos) {
+        return result; // No match
+    }
+
+    result.Position = chunkPos;
+    result.offset = entry.offset;
+
+    return result;
+}
+
+/* -- [[ Octree Traversal ]] -- */
+
+/* -- [[ Ray Intersection With AABB ]] -- */
 
 // Return true if the ray intersects an AABB, and set near/far distances
 bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tNear, out float tFar) {
@@ -56,7 +161,7 @@ bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tNear, out 
     return (tFar >= max(tNear, 0.0));
 }
 
-// Return true if a node is a leaf (no children)
+/* -- [[ Octree Leaf Decoding ]] -- */
 
 struct FlagBits {
     bool occupied;
@@ -70,17 +175,19 @@ FlagBits DecodeFlags(uint flags) {
     return result;
 }
 
-bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
+/* -- [[ Octree Traversal Function ]] -- */
+
+bool raymarchOctree(vec3 ro, vec3 rd, ChunkInfo rootNode, out vec4 hitColor ) {
     
     const int MAX_STACK = 64;
     uint stack[MAX_STACK];
     vec3 stackPos[MAX_STACK];
     int stackSize = 0;
     
-    int rootNodeIndex = int(chunksInformation[chunkIndex].RootOffset);
+    int rootNodeIndex = int(rootNode.offset);
 
     stack[stackSize] = rootNodeIndex;
-    stackPos[stackSize] = vec3(chunksInformation[chunkIndex].ChunkPos) * float(chunkSize * chunkScale);
+    stackPos[stackSize] = vec3(rootNode.Position) * float(chunkSize * chunkScale);
     stackSize++;
 
     while (stackSize > 0) {
@@ -97,10 +204,18 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
         vec3 boxMin = nodePos;
         vec3 boxMax = nodePos + vec3(size * chunkScale);
 
-        float tNear, tFar;
-        if (!intersectAABB(ro, rd, boxMin, boxMax, tNear, tFar)) {
-            continue;
+        /* -- [[ LOD Cutoff (Projected Size) ]] -- */
+        
+        float voxelSize = node.size * chunkScale;
+        float distance = length(camPos - ((boxMin + boxMax) / 2 ));
+        float screenSpaceSize = (voxelSize / distance) * resolutionScale;
+
+        if (screenSpaceSize < 1) {
+            hitColor = vec4(vec3(node.metadata.R, node.metadata.G, node.metadata.B) / 256.0, 1.0);
+            return true;
         }
+
+        /* -- [[ Check if node has any children ]] -- */
 
         FlagBits flagInfo = DecodeFlags( node.flags);
         
@@ -142,7 +257,6 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
             
             FlagBits flagInfo = DecodeFlags( child.flags);
 
-            //if ( !flagInfo.occupied ) continue;
 
             float size = child.size * chunkScale;
             vec3 childPos = nodePos + vec3(i & 1, (i >> 1) & 1, (i >> 2) & 1) * size; 
@@ -152,6 +266,14 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
 
             float tNear, tFar;
             if ( intersectAABB( ro, rd, minSize, maxSize, tNear, tFar )) {
+                    
+                if ( flagInfo.occupied && flagInfo.leaf ) {
+                    // Child is leaf, this means we can render this child as the final color
+
+                    hitColor = vec4(vec3(child.metadata.R, child.metadata.G, child.metadata.B) / 256.0, 1.0);
+                    return true;
+                };
+
                 children[childCount] = ChildEntry(cIndex, childPos, tNear);
                 childCount++;
             }
@@ -178,8 +300,102 @@ bool raymarchOctree(vec3 ro, vec3 rd, uint chunkIndex, out vec4 hitColor ) {
 
     }
 
-    return false; // background color
+    return false;
 }
+
+
+/* -- [[ Grid Map Traversal ]] -- */
+
+ivec3 getChunkPosition( vec3 Position ) {
+
+    ivec3 val;
+    float cScale = chunkSize * chunkScale;
+
+    val.x = int(floor( float(Position.x) / cScale ));
+    val.y = int(floor( float(Position.y) / cScale ) );
+    val.z = int(floor( float(Position.z) / cScale ));
+
+    return val;
+
+}
+
+FaceHit getVoxelFaceHit(vec3 ro, vec3 rd ) {
+
+    float cScale = chunkSize * chunkScale;
+
+    ivec3 voxel = ivec3(floor(ro / cScale));
+    ivec3 step = ivec3(sign(rd));
+    ivec3 positiveStep = ivec3(greaterThan(step, ivec3(0)));
+
+    vec3 chunkMin = vec3(voxel) * cScale;
+    vec3 chunkMax = chunkMin + vec3(cScale);
+
+    vec3 t1 = (chunkMin - ro) / rd;
+    vec3 t2 = (chunkMax - ro) / rd;
+
+    vec3 tMin = min(t1, t2);
+    vec3 tMax = max(t1, t2);
+
+    // Avoid div-by-zero in tDelta
+    vec3 tDelta = vec3(
+        rd.x != 0.0 ? cScale / abs(rd.x) : 1e30,
+        rd.y != 0.0 ? cScale / abs(rd.y) : 1e30,
+        rd.z != 0.0 ? cScale / abs(rd.z) : 1e30
+    );
+
+    FaceHit hit;
+
+    if (tMax.x < tMax.y && tMax.x < tMax.z) {
+        hit.normal = vec3(float(step.x), 0.0, 0.0);
+        hit.position = ro + rd * (tMax.x);
+    } else if (tMax.y < tMax.z) {
+        hit.normal = vec3(0.0, float(step.y), 0.0);
+        hit.position = ro + rd * (tMax.y);
+    } else {
+        hit.normal = vec3(0.0, 0.0, float(step.z));
+        hit.position = ro + rd * (tMax.z);
+    }
+
+    return hit;
+}
+
+bool traverseChunks( in vec3 ro, in vec3 rd, out vec4 finalColor ) { 
+
+    float cScale = chunkSize * chunkScale;
+
+    vec3 origin = ro;
+    ivec3 currentChunk = getChunkPosition(origin);
+
+    for (int i = 0; i < MAX_STEPS; i++) {
+
+        ChunkInfo f = lookupRootOffset( currentChunk );
+
+        if ( f.offset != MaxUINT32 ) {
+
+            FlagBits flagInfo = DecodeFlags( nodes[f.offset].flags);
+            
+            if (flagInfo.occupied) { 
+                
+                bool hit = raymarchOctree(ro, rd, f, finalColor);
+
+                if (hit == true) {
+                    return true;
+                }
+
+            }
+        }
+
+        FaceHit hit = getVoxelFaceHit(origin,rd);
+        currentChunk = currentChunk + ivec3(hit.normal);
+
+        origin = hit.position + ( hit.normal * ( EPSILON * cScale ) );
+
+    }
+
+    return false;
+}
+
+/* -- [[ Main function ]] -- */
 
 void main() {
     
@@ -193,34 +409,15 @@ void main() {
     vec3 rd_view = normalize(vec3(uv, -1.0));  // ray direction in view space
     vec3 rd = normalize((invView * vec4(rd_view, 0.0)).xyz);
 
+    vec3 debug_rd_view = normalize(vec3(0, 0, -1.0));
+    vec3 debug_rd = normalize((invView * vec4(debug_rd_view, 0.0)).xyz);
+
     float closestT = 1e30;
     vec4 finalColor = vec4(0.0);
-    bool foundHit = false;
 
-    for (uint chunkIndex = 0u; chunkIndex < numChunks; ++chunkIndex) {
-        vec3 chunkWorldPos = vec3(chunksInformation[chunkIndex].ChunkPos) * float(chunkSize*chunkScale);
-        vec3 bmin = chunkWorldPos;
-        vec3 bmax = chunkWorldPos + vec3(chunkSize*chunkScale);
+    bool hit = traverseChunks(ro, rd, finalColor );
 
-        float tNear, tFar;
-        if (!intersectAABB(ro, rd, bmin, bmax, tNear, tFar)) {
-            continue;
-        }
-
-        if (tNear >= closestT) {
-            continue;
-        }
-
-        vec4 hitColor;
-        bool hit = raymarchOctree(ro, rd, chunkIndex, hitColor);
-        if (hit && tNear < closestT) {
-            closestT = tNear;
-            finalColor = hitColor;
-            foundHit = true;
-        }
-    }
-
-    if (foundHit) {
+    if (hit) {
         FragColor = finalColor;
     } else {
         FragColor = vec4( vec3(0.3), 1.0 );

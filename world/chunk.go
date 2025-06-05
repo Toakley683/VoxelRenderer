@@ -32,8 +32,9 @@ func VoxelMetadata(idx int) GridMetadata {
 func NewChunk(WorldPosition Vec3) *Chunk {
 
 	outputChunk := Chunk{
-		Position: WorldPosition,
-		Voxels:   make([]uint8, (FULL_CHUNK_SIZE+7)/8),
+		Position:     WorldPosition,
+		Voxels:       make([]uint8, (FULL_CHUNK_SIZE+7)/8),
+		OctreeOffset: MaxUINT32,
 	}
 
 	StartedChunkGen := time.Now()
