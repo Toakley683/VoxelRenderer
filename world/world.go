@@ -12,15 +12,49 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 )
 
+type OctreeChanInput struct {
+	Input *Chunk
+	Value []GridNodeFlatGPU
+}
+
 var (
-	MainWorld *World
+	MainWorld            *World
+	CombinedOctree       map[*Chunk][]GridNodeFlatGPU = map[*Chunk][]GridNodeFlatGPU{}
+	CombinedOctreeLength uint32                       = 0
+
+	OctreeNodeByteSize int
+
+	CombinedOctreeChan = make(chan OctreeChanInput)
 )
 
 func init() {
 
+	var dummySize GridNodeFlatGPU
+	OctreeNodeByteSize = int(unsafe.Sizeof(dummySize))
+
 	MainWorld = &World{
 		RenderDistance: RENDER_DISTANCE_POINTER,
 	}
+
+	var LastCombinedOctreeLength uint32 = 0
+
+	go func() {
+		for {
+			for Data := range CombinedOctreeChan {
+
+				CombinedOctree[Data.Input] = Data.Value
+				Data.Input.OctreeOffset = uint32((len(CombinedOctree) - 1) * len(CombinedOctree[Data.Input]))
+				CombinedOctreeLength += uint32(len(CombinedOctree[Data.Input]))
+
+			}
+
+			if CombinedOctreeLength != LastCombinedOctreeLength {
+
+				Log.NewLog("Updated Octree, New Size:", CombinedOctreeLength)
+
+			}
+		}
+	}()
 
 }
 
@@ -97,10 +131,15 @@ func (w *World) Populate(shaderProgram uint32) {
 
 	}
 
-	worldAwait.Wait()
-	close(resultOutput)
+	go func() {
+		worldAwait.Wait()
+		close(resultOutput)
+	}()
 
 	for val := range resultOutput {
+
+		/* -- [[ Upload the Chunk Octree data to SSBO ]] -- */
+		val.value.Upload()
 
 		w.Chunks[val.index] = val.value
 
@@ -124,9 +163,9 @@ func (w *World) GetRootOffsets() []uint32 {
 
 func (w *World) UploadCombinedOctree(shaderProgram uint32) {
 
-	gpuNodes := BuildCombinedOctreeData(w.Chunks)
+	//gpuNodes := BuildCombinedOctreeData(w.Chunks)
 
-	w.UploadCombinedOctreeSSBO(gpuNodes, shaderProgram)
+	w.UploadCombinedOctreeSSBO(shaderProgram)
 
 	runtime.GC()
 
@@ -152,14 +191,7 @@ func (w *World) GetChunkPositions() []int32 {
 
 }
 
-func (w *World) UploadCombinedOctreeSSBO(nodes []GridNodeFlatGPU, shaderProgram uint32) {
-
-	if w.CombinedSSBO == 0 {
-		gl.GenBuffers(1, &w.CombinedSSBO)
-		if w.CombinedSSBO == 0 {
-			Log.NewLog("Failed to generate Combined SSBO")
-		}
-	}
+func (w *World) UploadCombinedOctreeSSBO(shaderProgram uint32) {
 
 	if w.WorldInfoSSBO == 0 {
 		gl.GenBuffers(1, &w.WorldInfoSSBO)
@@ -175,10 +207,10 @@ func (w *World) UploadCombinedOctreeSSBO(nodes []GridNodeFlatGPU, shaderProgram 
 		}
 	}
 
-	w.SendGPUBuffers(nodes, shaderProgram)
+	w.SendGPUBuffers(shaderProgram)
 }
 
-func (w *World) SendGPUBuffers(nodes []GridNodeFlatGPU, shaderProgram uint32) {
+func (w *World) SendGPUBuffers(shaderProgram uint32) {
 
 	if w.CombinedSSBO == 0 {
 		return
@@ -194,17 +226,6 @@ func (w *World) SendGPUBuffers(nodes []GridNodeFlatGPU, shaderProgram uint32) {
 	gl.Uniform1i(gl.GetUniformLocation(shaderProgram, gl.Str("numBuckets\x00")), int32(numBuckets))
 
 	/* -- [[ Send over the chunk information itself ]] -- */
-
-	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, w.CombinedSSBO)
-
-	gl.BufferData(
-		gl.SHADER_STORAGE_BUFFER,
-		len(nodes)*int(unsafe.Sizeof(nodes[0])),
-		gl.Ptr(nodes), gl.STATIC_DRAW,
-	)
-
-	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, w.CombinedSSBO)
-	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
 
 	/* -- [[ Send over the Chunk Info (Chunk Key & Chunk Root Offsets) itself ]] -- */
 
@@ -230,22 +251,6 @@ func (w *World) SendGPUBuffers(nodes []GridNodeFlatGPU, shaderProgram uint32) {
 	)
 
 	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 2, w.WorldInfoOffsetsSSBO)
-	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
-
-	if DEBUG_MODE == false {
-		return
-	}
-
-	// Debugging
-	var result [1]ChunkInfo
-	gl.GenBuffers(1, &w.DebugResultSSBO)
-	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, w.DebugResultSSBO)
-	gl.BufferData(
-		gl.SHADER_STORAGE_BUFFER,
-		int(unsafe.Sizeof(result[0])),
-		nil, gl.DYNAMIC_DRAW,
-	)
-	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 3, w.DebugResultSSBO)
 	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
 
 }

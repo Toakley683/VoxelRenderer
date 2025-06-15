@@ -3,8 +3,10 @@ package world
 import (
 	Log "VoxelRPG/logging"
 	"errors"
+	"fmt"
 	"math"
 
+	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/go-gl/mathgl/mgl32"
 )
 
@@ -24,12 +26,13 @@ const (
 
 	MaxUINT32 uint32 = 0xFFFFFFFF
 
-	DEBUG_MODE = false
+	DEBUG_MODE = true
 )
 
 var (
-	RENDER_DISTANCE         int  = 4
+	RENDER_DISTANCE         int  = 11
 	RENDER_DISTANCE_POINTER *int = &RENDER_DISTANCE
+	TOTAL_RENDERED_CHUNKS   int  = (RENDER_DISTANCE * RENDER_DISTANCE * RENDER_DISTANCE)
 )
 
 type Vec3 struct{ X, Y, Z int32 }
@@ -45,7 +48,6 @@ type Chunk struct {
 	Position Vec3
 	Voxels   []uint8
 
-	OctreeNodes  []GridNodeFlatGPU
 	OctreeOffset uint32
 }
 
@@ -337,4 +339,34 @@ func BuildPerfectHashTable(chunks []*Chunk) ([]uint32, []MapEntry, error) {
 	}
 
 	return displacements, table, nil
+}
+
+func GLErrorToString(err uint32) string {
+	switch err {
+	case gl.NO_ERROR:
+		return "NO_ERROR"
+	case gl.INVALID_ENUM:
+		return "INVALID_ENUM"
+	case gl.INVALID_VALUE:
+		return "INVALID_VALUE"
+	case gl.INVALID_OPERATION:
+		return "INVALID_OPERATION"
+	case gl.INVALID_FRAMEBUFFER_OPERATION:
+		return "INVALID_FRAMEBUFFER_OPERATION"
+	case gl.OUT_OF_MEMORY:
+		return "OUT_OF_MEMORY"
+	case gl.CONTEXT_LOST:
+		return "CONTEXT_LOST"
+	default:
+		return fmt.Sprintf("Unknown error: 0x%x", err)
+	}
+}
+
+func CheckGLError(context string) bool {
+	err := gl.GetError()
+	if err != gl.NO_ERROR {
+		Log.NewLog("OpenGL error in", context, ":", GLErrorToString(err))
+		return true
+	}
+	return false
 }

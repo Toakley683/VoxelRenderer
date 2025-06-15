@@ -1,13 +1,15 @@
 package world
 
 import (
+	"math"
 	"math/rand"
-	"runtime"
 	"sync"
 	"time"
+	"unsafe"
 
 	Log "VoxelRPG/logging"
 
+	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/go-gl/mathgl/mgl32"
 )
 
@@ -47,7 +49,7 @@ func NewChunk(WorldPosition Vec3) *Chunk {
 
 	StartedOctreeGen := time.Now()
 
-	outputChunk.BuildNodes()
+	outputChunk.SetupOctree()
 
 	Log.NewLog("Octree generation took:", time.Since(StartedOctreeGen))
 
@@ -55,11 +57,55 @@ func NewChunk(WorldPosition Vec3) *Chunk {
 
 }
 
-func (chunk *Chunk) BuildNodes() {
+func (chunk *Chunk) SetupOctree() {
 
-	chunk.OctreeNodes = chunk.BuildNestedGrid()
-	runtime.GC()
+	CombinedOctreeChan <- OctreeChanInput{
+		Input: chunk,
+		Value: chunk.BuildNestedGrid(),
+	}
 
+}
+
+func (chunk *Chunk) RemoveOctree() {
+	CombinedOctreeLength -= uint32(len(CombinedOctree[chunk]))
+	chunk.OctreeOffset = math.MaxUint32
+	CombinedOctree[chunk] = nil
+}
+
+func (chunk *Chunk) Upload() {
+
+	ssboOffsetBytes := int(chunk.OctreeOffset) * int(OctreeNodeByteSize)
+	data := unsafe.Pointer(&CombinedOctree[chunk][0])
+
+	Log.NewLog("Uploading new data, Total:", chunk.OctreeOffset)
+
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, MainWorld.CombinedSSBO)
+	gl.BufferSubData(gl.SHADER_STORAGE_BUFFER, ssboOffsetBytes, len(CombinedOctree[chunk])*OctreeNodeByteSize, data)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
+
+}
+
+func (chunk *Chunk) Unload() {
+
+	if len(CombinedOctree[chunk]) <= 0 {
+		Log.NewLog("Chunk already unloaded")
+		return
+	}
+
+	sizeBytes := len(CombinedOctree[chunk]) * OctreeNodeByteSize
+
+	zeroBytes := make([]byte, sizeBytes)
+	zeroData := unsafe.Pointer(&zeroBytes[0])
+
+	ssboOffsetBytes := int(chunk.OctreeOffset) * int(OctreeNodeByteSize)
+
+	Log.NewLog("Offset", chunk.OctreeOffset, (int(chunk.OctreeOffset) * int(OctreeNodeByteSize)), len(CombinedOctree[chunk])*OctreeNodeByteSize)
+
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, MainWorld.CombinedSSBO)
+	gl.BufferSubData(gl.SHADER_STORAGE_BUFFER, ssboOffsetBytes, sizeBytes, zeroData)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
+
+	CombinedOctree[chunk] = nil
 }
 
 func (chunk *Chunk) IsVisible(viewProjection mgl32.Mat4) bool {

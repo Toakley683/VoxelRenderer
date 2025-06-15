@@ -72,6 +72,10 @@ func renderLoop(window *glfw.Window) {
 		Types.WindowInputCB(Client, w, key, scancode, action, mods)
 	})
 
+	window.SetMouseButtonCallback(func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
+		Types.MouseInputCB(Client, w, button, action, mods)
+	})
+
 	window.SetCursorPosCallback(func(w *glfw.Window, xpos float64, ypos float64) {
 		Types.WindowMouseCB(Client, w, xpos, ypos)
 	})
@@ -113,7 +117,7 @@ func renderLoop(window *glfw.Window) {
 			Types.OpenGLFixedUpdate(window, WindowBuilder)
 			ClientContext.ClientCheckMovement(Client, float32(1.0)/float32(60.0))
 
-			fmt.Sprintf("FPS:", 1/Delta)
+			fmt.Println("FPS:", 1/Delta)
 
 		}
 

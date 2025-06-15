@@ -1,11 +1,5 @@
 package world
 
-import (
-	Log "VoxelRPG/logging"
-	"runtime"
-	"runtime/debug"
-)
-
 func GetChildIndex(parentIndex int, parentLevel int) int {
 	if parentLevel < 0 || parentLevel >= len(GridSizes)-1 {
 		return -1
@@ -105,38 +99,4 @@ func (chunk *Chunk) BuildNestedGrid() []GridNodeFlatGPU {
 
 	return Nodes
 
-}
-
-func BuildCombinedOctreeData(chunks []*Chunk) []GridNodeFlatGPU {
-
-	totalNodes := 0
-
-	for i := 0; i < len(chunks); i++ {
-		chunks[i].BuildNodes()
-		nodeCount := len(chunks[i].OctreeNodes)
-		totalNodes += nodeCount
-	}
-
-	Log.NewLog("Octree Length:", totalNodes)
-
-	combined := make([]GridNodeFlatGPU, totalNodes)
-
-	var currentOffset int = 0
-
-	for _, chunk := range chunks {
-
-		chunk.OctreeOffset = uint32(currentOffset)
-
-		copy(combined[currentOffset:], chunk.OctreeNodes)
-
-		currentOffset += len(chunk.OctreeNodes)
-
-		chunk.OctreeNodes = nil
-
-	}
-
-	runtime.GC()
-	debug.FreeOSMemory()
-
-	return combined
 }

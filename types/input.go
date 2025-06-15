@@ -18,6 +18,12 @@ func WindowInputCB(clientContext *Client.ClientContext, w *glfw.Window, key glfw
 
 }
 
+func MouseInputCB(clientContext *Client.ClientContext, w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
+
+	clientContext.ClientOnClick(button, action, mods)
+
+}
+
 func WindowMouseCB(clientContext *Client.ClientContext, w *glfw.Window, xpos float64, ypos float64) {
 
 	if w.GetAttrib(glfw.Focused) == 0 {

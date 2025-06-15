@@ -45,9 +45,9 @@ layout(std430, binding = 2) buffer Offsets {
     uint displacements[];
 };
 
-/*layout(std430, binding = 3) buffer DebugResult {
+layout(std430, binding = 3) buffer DebugResult {
     vec3 debugOutput;
-};*/
+};
 
 /* -- [[ World Variables ]] -- */
 
@@ -266,14 +266,6 @@ bool raymarchOctree(vec3 ro, vec3 rd, ChunkInfo rootNode, out vec4 hitColor ) {
 
             float tNear, tFar;
             if ( intersectAABB( ro, rd, minSize, maxSize, tNear, tFar )) {
-                    
-                if ( flagInfo.occupied && flagInfo.leaf ) {
-                    // Child is leaf, this means we can render this child as the final color
-
-                    hitColor = vec4(vec3(child.metadata.R, child.metadata.G, child.metadata.B) / 256.0, 1.0);
-                    return true;
-                };
-
                 children[childCount] = ChildEntry(cIndex, childPos, tNear);
                 childCount++;
             }
@@ -414,6 +406,8 @@ void main() {
 
     float closestT = 1e30;
     vec4 finalColor = vec4(0.0);
+
+    debugOutput = vec3(nodes[0].size, 12.0, 1000);
 
     bool hit = traverseChunks(ro, rd, finalColor );
 

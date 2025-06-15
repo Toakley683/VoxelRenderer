@@ -143,12 +143,37 @@ func setupBuffers(window *WindowBuilder) {
 	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
 	gl.BindVertexArray(0)
 
+	/* --[[ Generate World Info SSBO Buffer ]] */
+
+	if World.MainWorld.CombinedSSBO == 0 {
+		gl.GenBuffers(1, &World.MainWorld.CombinedSSBO)
+		if World.MainWorld.CombinedSSBO == 0 {
+			Log.NewLog("Failed to generate Combined SSBO")
+		}
+	}
+
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, World.MainWorld.CombinedSSBO)
+	BufferSize := (World.NodesRequired * (World.TOTAL_RENDERED_CHUNKS)) * int(World.OctreeNodeByteSize)
+	fmt.Printf("Allocating buffer size: %d bytes\n", BufferSize)
+
+	gl.BufferData(
+		gl.SHADER_STORAGE_BUFFER,
+		BufferSize,
+		nil,
+		gl.DYNAMIC_DRAW,
+	)
+
+	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, World.MainWorld.CombinedSSBO)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
+
 	/* --[[ Setup Octtree ]] */
 
 	World.MainWorld.Populate(shaderProgram)
 	World.MainWorld.Update(shaderProgram)
 
 	Log.NewLog("Total Voxel Count:", ((World.RENDER_DISTANCE * World.RENDER_DISTANCE * World.RENDER_DISTANCE) * (World.CHUNK_SIZE * World.CHUNK_SIZE * World.CHUNK_SIZE)))
+
+	Log.NewLog("Total Byte Count:", ((World.RENDER_DISTANCE * World.RENDER_DISTANCE * World.RENDER_DISTANCE) * World.OctreeNodeByteSize))
 
 	/* --[[ Frame Buffer Object for rendering world at low resolutions ]] */
 
@@ -174,6 +199,22 @@ func setupBuffers(window *WindowBuilder) {
 	}
 
 	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+
+	if World.DEBUG_MODE == false {
+		return
+	}
+
+	// Debugging
+	var result [1]World.ChunkInfo
+	gl.GenBuffers(1, &World.MainWorld.DebugResultSSBO)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, World.MainWorld.DebugResultSSBO)
+	gl.BufferData(
+		gl.SHADER_STORAGE_BUFFER,
+		int(unsafe.Sizeof(result[0])),
+		nil, gl.DYNAMIC_DRAW,
+	)
+	gl.BindBufferBase(gl.SHADER_STORAGE_BUFFER, 3, World.MainWorld.DebugResultSSBO)
+	gl.BindBuffer(gl.SHADER_STORAGE_BUFFER, 0)
 
 }
 
