@@ -26,7 +26,7 @@ const (
 
 	MaxUINT32 uint32 = 0xFFFFFFFF
 
-	DEBUG_MODE = true
+	DEBUG_MODE = false
 )
 
 var (
