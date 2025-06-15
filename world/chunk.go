@@ -17,7 +17,7 @@ import (
 
 func IsBlockFull(x, y, z int) bool {
 
-	return rand.Float32() > 0.5
+	return true //rand.Float32() > 0.5
 
 }
 

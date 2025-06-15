@@ -45,9 +45,9 @@ layout(std430, binding = 2) buffer Offsets {
     uint displacements[];
 };
 
-layout(std430, binding = 3) buffer DebugResult {
+/*layout(std430, binding = 3) buffer DebugResult {
     vec3 debugOutput;
-};
+};*/
 
 /* -- [[ World Variables ]] -- */
 
@@ -401,13 +401,8 @@ void main() {
     vec3 rd_view = normalize(vec3(uv, -1.0));  // ray direction in view space
     vec3 rd = normalize((invView * vec4(rd_view, 0.0)).xyz);
 
-    vec3 debug_rd_view = normalize(vec3(0, 0, -1.0));
-    vec3 debug_rd = normalize((invView * vec4(debug_rd_view, 0.0)).xyz);
-
     float closestT = 1e30;
     vec4 finalColor = vec4(0.0);
-
-    debugOutput = vec3(nodes[0].size, 12.0, 1000);
 
     bool hit = traverseChunks(ro, rd, finalColor );
 

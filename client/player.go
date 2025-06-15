@@ -7,7 +7,6 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	Log "VoxelRPG/logging"
-	World "VoxelRPG/world"
 )
 
 type Camera struct {
@@ -152,20 +151,6 @@ func ClientCheckMovement(context *ClientContext, deltaTime float32) {
 func (clientContext *ClientContext) ClientOnClick(button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
 
 	Log.NewLog("Clicked, Button:", button, "Action:", action, "Mods:", mods)
-
-	if button == glfw.MouseButton1 {
-		if action == glfw.Press {
-			Log.NewLog("Loading Chunk:", World.MainWorld.Chunks[0].Position)
-			World.MainWorld.Chunks[0].Upload()
-		}
-	}
-
-	if button == glfw.MouseButton2 {
-		if action == glfw.Press {
-			Log.NewLog("Unloading Chunk:", World.MainWorld.Chunks[0].Position)
-			World.MainWorld.Chunks[0].Unload()
-		}
-	}
 
 }
 
